@@ -4,10 +4,23 @@ import * as FileSystem from 'expo-file-system';
 const GEMINI_KEY = process.env.EXPO_PUBLIC_GEMINI_KEY;
 const genAI = new GoogleGenerativeAI(GEMINI_KEY);
 
+async function callGemini(modelName, base64Image, prompt) {
+  const model = genAI.getGenerativeModel({ model: modelName });
+  const result = await model.generateContent([
+    prompt,
+    {
+      inlineData: {
+        data: base64Image,
+        mimeType: "image/jpeg",
+      },
+    },
+  ]);
+  const response = await result.response;
+  return response.text();
+}
+
 export async function identifyNature(imageUri) {
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
     // Read image as base64
     const base64Image = await FileSystem.readAsStringAsync(imageUri, {
       encoding: FileSystem.EncodingType.Base64,
@@ -27,20 +40,17 @@ export async function identifyNature(imageUri) {
       }
     `;
 
-    const result = await model.generateContent([
-      prompt,
-      {
-        inlineData: {
-          data: base64Image,
-          mimeType: "image/jpeg",
-        },
-      },
-    ]);
-
-    const response = await result.response;
-    const text = response.text();
+    let text;
+    try {
+      // Try latest flash model
+      text = await callGemini("gemini-1.5-flash", base64Image, prompt);
+    } catch (e) {
+      console.log("Gemini 1.5 Flash failed, trying Pro Vision...", e.message);
+      // Fallback to pro vision
+      text = await callGemini("gemini-pro-vision", base64Image, prompt);
+    }
     
-    // Clean JSON from response (sometimes Gemini adds ```json ... ```)
+    // Clean JSON from response
     const jsonStr = text.replace(/```json|```/g, "").trim();
     return JSON.parse(jsonStr);
   } catch (error) {
